@@ -11,8 +11,9 @@
 #include <time.h>
 
 #define max(a, b) ((a) > (b) ? (a) : (b))
-#define THREAD_NUM 1    
-#define BUFFER_SIZE 256 
+#define THREAD_NUM 1    // Tamanho do pool de threads
+#define BUFFER_SIZE 256 // Número máximo de clocks enfileirados
+
 
 typedef struct Clock {
    int p[3];
@@ -21,14 +22,20 @@ typedef struct Clock {
 struct Args {
     int id;
     int pRank;
-    Clock clock;
 };
 
-struct Args2 {
-    int id;
-    int pRank;
-    
-};
+Clock clockQueueSaida[BUFFER_SIZE]; // Lista de clocks
+Clock clockQueueEntrada[BUFFER_SIZE]; // Lista de clocks
+int clockCountSaida = 0;
+int clockCountEntrada = 0;
+
+pthread_mutex_t mutexSaida; // define mutex
+pthread_mutex_t mutexEntrada; // define mutex
+
+pthread_cond_t condFullEntrada; // declara condição
+pthread_cond_t condFullSaida; // declara condição
+pthread_cond_t condEmptyEntrada; // declara condição
+pthread_cond_t condEmptySaida; // declara condição
 
 int compareClocks(Clock clock1, Clock clock2) {
     if (clock1.p[0] == clock2.p[0] && clock1.p[1] == clock2.p[1] && clock1.p[2] == clock2.p[2]) {
@@ -44,253 +51,81 @@ void Event(int pid, Clock *clock){
 
 
 void Send(int pidSender, int pidReceiver, Clock *clockSender){
-   // TO DO
-
-   
    MPI_Send(clockSender, sizeof(Clock), MPI_BYTE, pidReceiver, 0, MPI_COMM_WORLD);
-  
 }
 
+Clock getClockFromSaida() {
+        pthread_mutex_lock(&mutexSaida);
+    
+        while (clockCountSaida == 0) {
+            pthread_cond_wait(&condEmptySaida, &mutexSaida);
+        }
+        
+        Clock clock = clockQueueSaida[0];
+        int i;
+        for (i = 0; i < clockCountSaida - 1; i++) {
+            clockQueueSaida[i] = clockQueueSaida[i + 1];
+        }
+        clockCountSaida--;
+        
+        pthread_mutex_unlock(&mutexSaida);
+        pthread_cond_signal(&condFullSaida);
+        return clock;
+}
 
-Clock clockQueueEntradaP0[BUFFER_SIZE]; // Lista de clocks na fila de entrada de P0
-Clock clockQueueEntradaP1[BUFFER_SIZE]; // Lista de clocks na fila de entrada de P1
-Clock clockQueueEntradaP2[BUFFER_SIZE]; // Lista de clocks na fila de entrada de P2
-Clock clockQueueSaidaP0[BUFFER_SIZE]; // Lista de clocks na fila de saida de P0
-Clock clockQueueSaidaP1[BUFFER_SIZE]; // Lista de clocks na fila de saida de P1
-Clock clockQueueSaidaP2[BUFFER_SIZE]; // Lista de clocks na fila de saida de P2
-
-int clockCountEntradaP0 = 0;
-int clockCountSaidaP0 = 0;
-int clockCountEntradaP1 = 0;
-int clockCountSaidaP1 = 0;
-int clockCountEntradaP2 = 0;
-int clockCountSaidaP2 = 0;
-
-pthread_mutex_t mutexEntradaP0; // define mutex
-pthread_mutex_t mutexEntradaP1; // define mutex
-pthread_mutex_t mutexEntradaP2; // define mutex
-pthread_mutex_t mutexSaidaP0; // define mutex
-pthread_mutex_t mutexSaidaP1; // define mutex
-pthread_mutex_t mutexSaidaP2; // define mutex
-
-pthread_cond_t condFullEntradaP0;  // declara condição
-pthread_cond_t condFullSaidaP0;  // declara condição
-pthread_cond_t condFullEntradaP1;  // declara condição
-pthread_cond_t condFullSaidaP1;  // declara condição
-pthread_cond_t condFullEntradaP2;  // declara condição
-pthread_cond_t condFullSaidaP2;  // declara condição
-pthread_cond_t condEmptyEntradaP0; // declara condição
-pthread_cond_t condEmptySaidaP0; // declara condição
-pthread_cond_t condEmptyEntradaP1; // declara condição
-pthread_cond_t condEmptySaidaP1; // declara condição
-pthread_cond_t condEmptyEntradaP2; // declara condição
-pthread_cond_t condEmptySaidaP2; // declara condição
-
-void printConsumeClock(Clock *clock, int id)
+Clock getClockFromEntrada()
 {
-    printf("Thread %d consumed Clock: (%d, %d, %d)\n", id, clock->p[0], clock->p[1], clock->p[2]);
+    
+        pthread_mutex_lock(&mutexEntrada);
+    
+        while (clockCountEntrada == 0) {
+            pthread_cond_wait(&condEmptyEntrada, &mutexEntrada);
+        }
+        
+        Clock clock = clockQueueEntrada[0];
+        int i;
+        for (i = 0; i < clockCountEntrada - 1; i++) {
+        clockQueueEntrada[i] = clockQueueEntrada[i + 1];
+        }
+        clockCountEntrada--;
+        
+        pthread_mutex_unlock(&mutexEntrada);
+        pthread_cond_signal(&condFullEntrada);
+        return clock;
 }
 
-void printSubmitClock(Clock *clock, int id)
+void submitClockToEntrada(Clock clock)
 {
-    printf("Thread %d submitted Clock: (%d, %d, %d)\n", id, clock->p[0], clock->p[1], clock->p[2]);
+        pthread_mutex_lock(&mutexEntrada);
+        while (clockCountEntrada == BUFFER_SIZE) {
+            pthread_cond_wait(&condFullEntrada, &mutexEntrada);
+        }
+        
+        clockQueueEntrada[clockCountEntrada] = clock;
+        clockCountEntrada++;
+        
+        pthread_mutex_unlock(&mutexEntrada);
+        pthread_cond_signal(&condEmptyEntrada);
 }
 
-Clock getClockFromSaida(int pRank) {
-    if (pRank == 0) {
-        pthread_mutex_lock(&mutexSaidaP0);
-    
-        while (clockCountSaidaP0 == 0) {
-            pthread_cond_wait(&condEmptySaidaP0, &mutexSaidaP0);
-        }
-        
-        Clock clock = clockQueueSaidaP0[0];
-        int i;
-        for (i = 0; i < clockCountSaidaP0 - 1; i++) {
-        clockQueueSaidaP0[i] = clockQueueSaidaP0[i + 1];
-        }
-        clockCountSaidaP0--;
-        
-        pthread_mutex_unlock(&mutexSaidaP0);
-        pthread_cond_signal(&condFullSaidaP0);
-        return clock;
-    } else if (pRank == 1) {
-        pthread_mutex_lock(&mutexSaidaP1);
-    
-        while (clockCountSaidaP1 == 0) {
-            pthread_cond_wait(&condEmptySaidaP1, &mutexSaidaP1);
-        }
-        
-        Clock clock = clockQueueSaidaP1[0];
-        int i;
-        for (i = 0; i < clockCountSaidaP1 - 1; i++) {
-        clockQueueSaidaP1[i] = clockQueueSaidaP1[i + 1];
-        }
-        clockCountSaidaP1--;
-        
-        pthread_mutex_unlock(&mutexSaidaP1);
-        pthread_cond_signal(&condFullSaidaP1);
-        return clock;
-        
-    } else if (pRank == 2) {
-        pthread_mutex_lock(&mutexSaidaP2);
-    
-        while (clockCountSaidaP2 == 0) {
-            pthread_cond_wait(&condEmptySaidaP2, &mutexSaidaP2);
-        }
-        
-        Clock clock = clockQueueSaidaP2[0];
-        int i;
-        for (i = 0; i < clockCountSaidaP2 - 1; i++) {
-        clockQueueSaidaP2[i] = clockQueueSaidaP2[i + 1];
-        }
-        clockCountSaidaP2--;
-        
-        pthread_mutex_unlock(&mutexSaidaP2);
-        pthread_cond_signal(&condFullSaidaP2);
-        return clock;
-    }
-}
-
-Clock getClockFromEntrada(int pRank)
+void submitClockToSaida(Clock clock)
 {
-    if (pRank == 0) {
-        pthread_mutex_lock(&mutexEntradaP0);
-    
-        while (clockCountEntradaP0 == 0) {
-            pthread_cond_wait(&condEmptyEntradaP0, &mutexEntradaP0);
+        pthread_mutex_lock(&mutexSaida);
+        while (clockCountSaida == BUFFER_SIZE) {
+            pthread_cond_wait(&condFullSaida, &mutexSaida);
         }
         
-        Clock clock = clockQueueEntradaP0[0];
-        int i;
-        for (i = 0; i < clockCountEntradaP0 - 1; i++) {
-        clockQueueEntradaP0[i] = clockQueueEntradaP0[i + 1];
-        }
-        clockCountEntradaP0--;
+        clockQueueSaida[clockCountSaida] = clock;
+        clockCountSaida++;
         
-        pthread_mutex_unlock(&mutexEntradaP0);
-        pthread_cond_signal(&condFullEntradaP0);
-        return clock;
-    } else if (pRank == 1) {
-        pthread_mutex_lock(&mutexEntradaP1);
-    
-        while (clockCountEntradaP1 == 0) {
-            pthread_cond_wait(&condEmptyEntradaP1, &mutexEntradaP1);
-        }
-        
-        Clock clock = clockQueueEntradaP1[0];
-        int i;
-        for (i = 0; i < clockCountEntradaP1 - 1; i++) {
-        clockQueueEntradaP1[i] = clockQueueEntradaP1[i + 1];
-        }
-        clockCountEntradaP1--;
-        
-        pthread_mutex_unlock(&mutexEntradaP1);
-        pthread_cond_signal(&condFullEntradaP1);
-        return clock;
-        
-    } else if (pRank == 2) {
-        pthread_mutex_lock(&mutexEntradaP2);
-    
-        while (clockCountEntradaP2 == 0) {
-            pthread_cond_wait(&condEmptyEntradaP2, &mutexEntradaP2);
-        }
-        
-        Clock clock = clockQueueEntradaP2[0];
-        int i;
-        for (i = 0; i < clockCountEntradaP2 - 1; i++) {
-        clockQueueEntradaP2[i] = clockQueueEntradaP2[i + 1];
-        }
-        clockCountEntradaP2--;
-        
-        pthread_mutex_unlock(&mutexEntradaP2);
-        pthread_cond_signal(&condFullEntradaP2);
-        return clock;
-    }
-}
-
-void submitClockToEntrada(Clock clock, int pRank)
-{
-    if (pRank == 0) {
-        pthread_mutex_lock(&mutexEntradaP0);
-        while (clockCountEntradaP0 == BUFFER_SIZE) {
-            pthread_cond_wait(&condFullEntradaP0, &mutexEntradaP0);
-        }
-        
-        clockQueueEntradaP0[clockCountEntradaP0] = clock;
-        clockCountEntradaP0++;
-        
-        pthread_mutex_unlock(&mutexEntradaP0);
-        pthread_cond_signal(&condEmptyEntradaP0);
-        
-    } else if (pRank == 1) {
-        pthread_mutex_lock(&mutexEntradaP1);
-        while (clockCountEntradaP1 == BUFFER_SIZE) {
-            pthread_cond_wait(&condFullEntradaP1, &mutexEntradaP1);
-        }
-        
-        clockQueueEntradaP1[clockCountEntradaP1] = clock;
-        clockCountEntradaP1++;
-        
-        pthread_mutex_unlock(&mutexEntradaP1);
-        pthread_cond_signal(&condEmptyEntradaP1);
-    } else if (pRank == 2) {
-        pthread_mutex_lock(&mutexEntradaP2);
-        while (clockCountEntradaP2 == BUFFER_SIZE) {
-            pthread_cond_wait(&condFullEntradaP2, &mutexEntradaP2);
-        }
-        
-        clockQueueEntradaP2[clockCountEntradaP2] = clock;
-        clockCountEntradaP2++;
-        
-        pthread_mutex_unlock(&mutexEntradaP2);
-        pthread_cond_signal(&condEmptyEntradaP2);
-    }
-}
-
-void submitClockToSaida(Clock clock, int pRank)
-{
-    if (pRank == 0) {
-        pthread_mutex_lock(&mutexSaidaP0);
-        while (clockCountSaidaP0 == BUFFER_SIZE) {
-            pthread_cond_wait(&condFullSaidaP0, &mutexSaidaP0);
-        }
-        
-        clockQueueSaidaP0[clockCountSaidaP0] = clock;
-        clockCountSaidaP0++;
-        
-        pthread_mutex_unlock(&mutexSaidaP0);
-        pthread_cond_signal(&condEmptySaidaP0);
-        
-    } else if (pRank == 1) {
-        pthread_mutex_lock(&mutexSaidaP1);
-        while (clockCountSaidaP1 == BUFFER_SIZE) {
-            pthread_cond_wait(&condFullSaidaP1, &mutexSaidaP1);
-        }
-        
-        clockQueueSaidaP1[clockCountSaidaP1] = clock;
-        clockCountSaidaP1++;
-        
-        pthread_mutex_unlock(&mutexSaidaP1);
-        pthread_cond_signal(&condEmptySaidaP1);
-    } else if (pRank == 2) {
-        pthread_mutex_lock(&mutexSaidaP2);
-        while (clockCountSaidaP2 == BUFFER_SIZE) {
-            pthread_cond_wait(&condFullSaidaP2, &mutexSaidaP2);
-        }
-        
-        clockQueueSaidaP2[clockCountSaidaP2] = clock;
-        clockCountSaidaP2++;
-        
-        pthread_mutex_unlock(&mutexSaidaP2);
-        pthread_cond_signal(&condEmptySaidaP2);
-    }
+        pthread_mutex_unlock(&mutexSaida);
+        pthread_cond_signal(&condEmptySaida);
 }
 
 void Receive(int pidSender, int pidReceiver){
    Clock clockMsg; 
    MPI_Recv(&clockMsg, sizeof(Clock), MPI_BYTE, pidSender, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-   submitClockToEntrada(clockMsg, pidReceiver);
+   submitClockToEntrada(clockMsg);
    printf("O clock (%d, %d, %d) foi recebido pelo processo %d\n", clockMsg.p[0], clockMsg.p[1], clockMsg.p[2], pidReceiver);
    
 }
@@ -302,14 +137,22 @@ void *startThreadsPrincipal(void *args);
 
 // Representa o processo de rank 0
 void process0(int pRank){
+    
+    pthread_mutex_init(&mutexEntrada, NULL);
+    pthread_mutex_init(&mutexSaida, NULL);
+    
+    pthread_cond_init(&condEmptySaida, NULL);
+    pthread_cond_init(&condEmptyEntrada, NULL);
+    pthread_cond_init(&condFullSaida, NULL);
+    pthread_cond_init(&condFullEntrada, NULL);
+    
     Clock clock = {{0,0,0}};
     
     int i = 0;
     struct Args argumentosEntradaP0;
-    struct Args2 argumentosSaidaP0;
-    struct Args2 argumentosPrincipalP0;
+    struct Args argumentosSaidaP0;
+    struct Args argumentosPrincipalP0;
     argumentosEntradaP0.id = 0;
-    argumentosEntradaP0.clock = clock;
     argumentosEntradaP0.pRank = pRank;
     
     
@@ -319,12 +162,6 @@ void process0(int pRank){
     argumentosPrincipalP0.id = 2;
     argumentosPrincipalP0.pRank = pRank;
     
-    pthread_mutex_init(&mutexEntradaP0, NULL);
-    pthread_mutex_init(&mutexSaidaP0, NULL);
-    pthread_cond_init(&condEmptyEntradaP0, NULL);
-    pthread_cond_init(&condFullEntradaP0, NULL);
-    pthread_cond_init(&condFullSaidaP0, NULL);
-    pthread_cond_init(&condEmptySaidaP0, NULL);
     pthread_t thread[THREAD_NUM];
     srand(time(NULL));
     
@@ -353,25 +190,37 @@ void process0(int pRank){
         pthread_join(thread[i], NULL);
     }
     
+   pthread_mutex_destroy(&mutexEntrada);
+   pthread_mutex_destroy(&mutexSaida);
+   pthread_cond_destroy(&condEmptyEntrada);
+   pthread_cond_destroy(&condEmptySaida);
+   pthread_cond_destroy(&condFullEntrada);
+   pthread_cond_destroy(&condFullSaida);
     
-    pthread_mutex_destroy(&mutexEntradaP0);
-    pthread_mutex_destroy(&mutexSaidaP0);
-    pthread_cond_destroy(&condEmptyEntradaP0);
-    pthread_cond_destroy(&condFullEntradaP0);
-    pthread_cond_destroy(&condFullSaidaP0);
-    pthread_cond_destroy(&condEmptySaidaP0);
 }
 
 // Representa o processo de rank 1
 void process1(int pRank){
+    pthread_mutex_init(&mutexEntrada, NULL);
+    pthread_mutex_init(&mutexSaida, NULL);
+
+    pthread_cond_init(&condEmptySaida, NULL);
+    pthread_cond_init(&condEmptyEntrada, NULL);
+    pthread_cond_init(&condFullSaida, NULL);
+    pthread_cond_init(&condFullEntrada, NULL);
+    
+    Clock clockQueueSaida[BUFFER_SIZE]; // Lista de clocks
+    Clock clockQueueEntrada[BUFFER_SIZE]; // Lista de clocks
+    int clockCountSaida = 0;
+    int clockCountEntrada = 0;
+    
     Clock clock = {{0,0,0}};
     int i = 0;
     struct Args argumentosEntradaP1;
-    struct Args2 argumentosSaidaP1;
-    struct Args2 argumentosPrincipalP1;
+    struct Args argumentosSaidaP1;
+    struct Args argumentosPrincipalP1;
     
     argumentosEntradaP1.id = 0;
-    argumentosEntradaP1.clock = clock;
     argumentosEntradaP1.pRank = pRank;
     
     argumentosSaidaP1.id = 1;
@@ -380,25 +229,17 @@ void process1(int pRank){
     argumentosPrincipalP1.id = 2;
     argumentosPrincipalP1.pRank = pRank;
     
-    pthread_mutex_init(&mutexEntradaP1, NULL);
-    pthread_mutex_init(&mutexSaidaP1, NULL);
-    pthread_cond_init(&condEmptyEntradaP1, NULL);
-    pthread_cond_init(&condEmptySaidaP1, NULL);
-    pthread_cond_init(&condFullEntradaP1, NULL);
-    pthread_cond_init(&condFullSaidaP1, NULL);
     pthread_t thread[THREAD_NUM];
     srand(time(NULL));
     
-    
-    
-    if (pthread_create(&thread[i], NULL, &startThreadsEntrada, (void *)&argumentosEntradaP1) != 0) // testar com e sem o "&" no argumento
+    if (pthread_create(&thread[i], NULL, &startThreadsEntrada, (void *)&argumentosEntradaP1) != 0) 
     {
       perror("Failed to create the thread");
     }
     
     i += 1;
     
-    if (pthread_create(&thread[i], NULL, &startThreadsSaida, (void *)&argumentosSaidaP1) != 0) // testar com e sem o "&" no argumento
+    if (pthread_create(&thread[i], NULL, &startThreadsSaida, (void *)&argumentosSaidaP1) != 0) 
     {
       perror("Failed to create the thread");
     }
@@ -414,26 +255,31 @@ void process1(int pRank){
         pthread_join(thread[i], NULL);
     }
     
-    
-    pthread_mutex_destroy(&mutexEntradaP1);
-    pthread_mutex_destroy(&mutexSaidaP1);
-    pthread_cond_destroy(&condEmptyEntradaP1);
-    pthread_cond_destroy(&condEmptySaidaP1);
-    pthread_cond_destroy(&condFullEntradaP1);
-    pthread_cond_destroy(&condFullSaidaP1);
-   
-   
+   pthread_mutex_destroy(&mutexEntrada);
+   pthread_mutex_destroy(&mutexSaida);
+   pthread_cond_destroy(&condEmptyEntrada);
+   pthread_cond_destroy(&condEmptySaida);
+   pthread_cond_destroy(&condFullEntrada);
+   pthread_cond_destroy(&condFullSaida);
 }
 
 // Representa o processo de rank 2
 void process2(int pRank){
+    
+    pthread_mutex_init(&mutexEntrada, NULL);
+    pthread_mutex_init(&mutexSaida, NULL);
+    
+    pthread_cond_init(&condEmptySaida, NULL);
+    pthread_cond_init(&condEmptyEntrada, NULL);
+    pthread_cond_init(&condFullSaida, NULL);
+    pthread_cond_init(&condFullEntrada, NULL);
+    
     Clock clock = {{0,0,0}};
     int i = 0;
     struct Args argumentosEntradaP2;
-    struct Args2 argumentosSaidaP2;
-    struct Args2 argumentosPrincipalP2;
+    struct Args argumentosSaidaP2;
+    struct Args argumentosPrincipalP2;
     argumentosEntradaP2.id = 0;
-    argumentosEntradaP2.clock = clock;
     argumentosEntradaP2.pRank = pRank;
     
     argumentosSaidaP2.id = 1;
@@ -442,12 +288,6 @@ void process2(int pRank){
     argumentosPrincipalP2.id = 2;
     argumentosPrincipalP2.pRank = pRank;
     
-    pthread_mutex_init(&mutexEntradaP2, NULL);
-    pthread_mutex_init(&mutexSaidaP2, NULL);
-    pthread_cond_init(&condEmptyEntradaP2, NULL);
-    pthread_cond_init(&condEmptySaidaP2, NULL);
-    pthread_cond_init(&condFullEntradaP2, NULL);
-    pthread_cond_init(&condFullSaidaP2, NULL);
     
     pthread_t thread[THREAD_NUM];
     
@@ -474,14 +314,12 @@ void process2(int pRank){
         pthread_join(thread[i], NULL);
     }
     
-    
-    pthread_mutex_destroy(&mutexEntradaP2);
-    pthread_mutex_destroy(&mutexSaidaP2);
-    pthread_cond_destroy(&condEmptyEntradaP2);
-    pthread_cond_destroy(&condEmptySaidaP2);
-    pthread_cond_destroy(&condFullEntradaP2);
-    pthread_cond_destroy(&condFullSaidaP2);
-   
+   pthread_mutex_destroy(&mutexEntrada);
+   pthread_mutex_destroy(&mutexSaida);
+   pthread_cond_destroy(&condEmptyEntrada);
+   pthread_cond_destroy(&condEmptySaida);
+   pthread_cond_destroy(&condFullEntrada);
+   pthread_cond_destroy(&condFullSaida);
 }
 
 int main(void) {
@@ -499,29 +337,21 @@ int main(void) {
       process2(2);
     }
     
-    
     /* Finaliza MPI */
     MPI_Finalize(); 
     
     return 0;
 }  /* main */
 
-
-
 void *startThreadsEntrada(void *args)
 {
     struct Args *argumentos = (struct Args *)args;
-    Clock clockAtual = argumentos->clock; // testar
-    int pRank = argumentos->pRank; // testar
+    int pRank = argumentos->pRank; 
     int id = argumentos->id;
-    // printf("////// PROCESSO %d | THREAD ENTRADA: %d //////\n", pRank, id);
     
     if (pRank == 0) {
-        
-           Receive(1, 0);
-           Receive(2, 0); 
-        
-            
+        Receive(1, 0);
+        Receive(2, 0); 
     } else if (pRank == 1) {
         while (1) {
             Receive(0, 1);
@@ -541,8 +371,6 @@ void *startThreadsSaida(void *args)
     int pRank = argumentos->pRank; 
     int id = argumentos->id;
     
-    // printf("////// PROCESSO %d | THREAD SAIDA: %d //////\n", pRank, id);
-    
     if (pRank == 0 ) {
         Clock clock = {{0, 0, 0}}; 
         
@@ -552,9 +380,8 @@ void *startThreadsSaida(void *args)
         
         while (1) {
             
-            if (clockCountSaidaP0 > 0) {
-                clock = getClockFromSaida(pRank);
-                // printf("O clock (%d, %d, %d) foi retirado da fila de saida do processo %d\n", clock.p[0], clock.p[1], clock.p[2], pRank);
+            if (clockCountSaida > 0) {
+                clock = getClockFromSaida();
             }
             
             if (compareClocks(clock, a)) {
@@ -570,18 +397,14 @@ void *startThreadsSaida(void *args)
                 Send(pRank, 1, &clock);
                 printf("O clock (%d, %d, %d) foi enviado do processo %d para o processo %d\n", clock.p[0], clock.p[1], clock.p[2], 0, 1);
             }
-            
         }
-        
-        
     } else if (pRank == 1) {
         Clock clock = {{0, 0, 0}}; 
         
         while (1) {
             
-            if (clockCountSaidaP1 > 0) {
-                clock = getClockFromSaida(pRank);
-            // printf("O clock (%d, %d, %d) foi retirado da fila de saida do processo %d\n", clock.p[0], clock.p[1], clock.p[2], pRank);
+            if (clockCountSaida > 0) {
+                clock = getClockFromSaida();
             }
             
             Clock inicial = {{0, 0, 0}};
@@ -596,10 +419,8 @@ void *startThreadsSaida(void *args)
     } else if (pRank == 2) {
         Clock clock = {{0, 0, 0}}; 
         while(1) {
-            
-            if (clockCountSaidaP2 > 0) {
-               clock = getClockFromSaida(pRank);
-            // printf("O clock (%d, %d, %d) foi retirado da fila de saida do processo %d\n", clock.p[0], clock.p[1], clock.p[2], pRank);
+            if (clockCountSaida > 0) {
+               clock = getClockFromSaida();
             }
             
             Clock k = {{0, 0, 1}};
@@ -620,7 +441,6 @@ void *startThreadsPrincipal(void *args) {
     int pRank = argumentos->pRank; 
     int id = argumentos->id;
     
-    // printf("////// PROCESSO %d | THREAD PRINCIPAL: %d //////\n", pRank, id);
     if (pRank == 0) {
         Clock currentClock = {{0, 0, 0}};
         Clock g = {{6, 1, 2}};
@@ -634,8 +454,7 @@ void *startThreadsPrincipal(void *args) {
             Clock e = {{5, 1, 2}};
             
             if (compareClocks(currentClock, a) || compareClocks(currentClock, c) || compareClocks(currentClock, e)) {
-                submitClockToSaida(currentClock, pRank);
-                // printf("O clock (%d, %d, %d) foi submetido para a fila de saida do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
+                submitClockToSaida(currentClock);
                 currentClock.p[pRank]++;
                 printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
             }
@@ -645,15 +464,15 @@ void *startThreadsPrincipal(void *args) {
                 printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
             }
             
-            
-            if (clockQueueEntradaP0 > 0) {
-                Clock nextClock = getClockFromEntrada(pRank);
+            if (clockQueueEntrada > 0) {
+                Clock nextClock = getClockFromEntrada();
                 currentClock.p[pRank]++;
                 for(int i = 0; i < 3; i++) {
                     currentClock.p[i] = max(nextClock.p[i], currentClock.p[i]);
                 }
             }
         }
+        
     } else if (pRank == 1) {
         
         Clock currentClock = {{0, 0, 0}};
@@ -663,13 +482,12 @@ void *startThreadsPrincipal(void *args) {
             Clock h = {{0, 0, 0}};
             
             if (compareClocks(currentClock, h)) {
-                submitClockToSaida(currentClock, pRank);
+                submitClockToSaida(currentClock);
                 currentClock.p[pRank]++;
                 printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
-                // printf("O clock (%d, %d, %d) foi submetido para a fila de saida do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
             }
-            if (clockQueueEntradaP1 > 0) {
-                Clock nextClock = getClockFromEntrada(pRank);
+            if (clockQueueEntrada > 0) {
+                Clock nextClock = getClockFromEntrada();
                 currentClock.p[pRank]++;
                 for(int i = 0; i < 3; i++) {
                     currentClock.p[i] = max(nextClock.p[i], currentClock.p[i]);
@@ -687,14 +505,13 @@ void *startThreadsPrincipal(void *args) {
             Clock k = {{0, 0, 1}};
             
             if (compareClocks(currentClock, k)) {
-                submitClockToSaida(currentClock, pRank);
+                submitClockToSaida(currentClock);
                 currentClock.p[pRank]++;
                 printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
-                // printf("O clock (%d, %d, %d) foi submetido para a fila de saida do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
             }
             
-            if (clockQueueEntradaP2 > 0) {
-                Clock nextClock = getClockFromEntrada(pRank);
+            if (clockQueueEntrada > 0) {
+                Clock nextClock = getClockFromEntrada();
                 currentClock.p[pRank]++;
                 for(int i = 0; i < 3; i++) {
                     currentClock.p[i] = max(nextClock.p[i], currentClock.p[i]);
