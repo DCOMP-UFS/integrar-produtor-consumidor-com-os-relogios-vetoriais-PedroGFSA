@@ -49,7 +49,6 @@ void Event(int pid, Clock *clock){
    clock->p[pid]++;   
 }
 
-
 void Send(int pidSender, int pidReceiver, Clock *clockSender){
    MPI_Send(clockSender, sizeof(Clock), MPI_BYTE, pidReceiver, 0, MPI_COMM_WORLD);
 }
@@ -124,7 +123,7 @@ void submitClockToSaida(Clock clock)
 
 void Receive(int pidSender, int pidReceiver){
    Clock clockMsg; 
-   MPI_Recv(&clockMsg, sizeof(Clock), MPI_BYTE, pidSender, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+   MPI_Recv(&clockMsg, sizeof(Clock), MPI_BYTE, MPI_ANY_SOURCE , 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
    submitClockToEntrada(clockMsg);
    printf("O clock (%d, %d, %d) foi recebido pelo processo %d\n", clockMsg.p[0], clockMsg.p[1], clockMsg.p[2], pidReceiver);
    
@@ -190,12 +189,12 @@ void process0(int pRank){
         pthread_join(thread[i], NULL);
     }
     
-   pthread_mutex_destroy(&mutexEntrada);
-   pthread_mutex_destroy(&mutexSaida);
-   pthread_cond_destroy(&condEmptyEntrada);
-   pthread_cond_destroy(&condEmptySaida);
-   pthread_cond_destroy(&condFullEntrada);
-   pthread_cond_destroy(&condFullSaida);
+    pthread_mutex_destroy(&mutexEntrada);
+    pthread_mutex_destroy(&mutexSaida);
+    pthread_cond_destroy(&condEmptyEntrada);
+    pthread_cond_destroy(&condEmptySaida);
+    pthread_cond_destroy(&condFullEntrada);
+    pthread_cond_destroy(&condFullSaida);
     
 }
 
@@ -211,8 +210,6 @@ void process1(int pRank){
     
     Clock clockQueueSaida[BUFFER_SIZE]; // Lista de clocks
     Clock clockQueueEntrada[BUFFER_SIZE]; // Lista de clocks
-    int clockCountSaida = 0;
-    int clockCountEntrada = 0;
     
     Clock clock = {{0,0,0}};
     int i = 0;
@@ -232,14 +229,14 @@ void process1(int pRank){
     pthread_t thread[THREAD_NUM];
     srand(time(NULL));
     
-    if (pthread_create(&thread[i], NULL, &startThreadsEntrada, (void *)&argumentosEntradaP1) != 0) 
+    if (pthread_create(&thread[i], NULL, &startThreadsEntrada, (void *)&argumentosEntradaP1) != 0) // testar com e sem o "&" no argumento
     {
       perror("Failed to create the thread");
     }
     
     i += 1;
     
-    if (pthread_create(&thread[i], NULL, &startThreadsSaida, (void *)&argumentosSaidaP1) != 0) 
+    if (pthread_create(&thread[i], NULL, &startThreadsSaida, (void *)&argumentosSaidaP1) != 0) // testar com e sem o "&" no argumento
     {
       perror("Failed to create the thread");
     }
@@ -255,12 +252,12 @@ void process1(int pRank){
         pthread_join(thread[i], NULL);
     }
     
-   pthread_mutex_destroy(&mutexEntrada);
-   pthread_mutex_destroy(&mutexSaida);
-   pthread_cond_destroy(&condEmptyEntrada);
-   pthread_cond_destroy(&condEmptySaida);
-   pthread_cond_destroy(&condFullEntrada);
-   pthread_cond_destroy(&condFullSaida);
+    pthread_mutex_destroy(&mutexEntrada);
+    pthread_mutex_destroy(&mutexSaida);
+    pthread_cond_destroy(&condEmptyEntrada);
+    pthread_cond_destroy(&condEmptySaida);
+    pthread_cond_destroy(&condFullEntrada);
+    pthread_cond_destroy(&condFullSaida);
 }
 
 // Representa o processo de rank 2
@@ -314,12 +311,12 @@ void process2(int pRank){
         pthread_join(thread[i], NULL);
     }
     
-   pthread_mutex_destroy(&mutexEntrada);
-   pthread_mutex_destroy(&mutexSaida);
-   pthread_cond_destroy(&condEmptyEntrada);
-   pthread_cond_destroy(&condEmptySaida);
-   pthread_cond_destroy(&condFullEntrada);
-   pthread_cond_destroy(&condFullSaida);
+    pthread_mutex_destroy(&mutexEntrada);
+    pthread_mutex_destroy(&mutexSaida);
+    pthread_cond_destroy(&condEmptyEntrada);
+    pthread_cond_destroy(&condEmptySaida);
+    pthread_cond_destroy(&condFullEntrada);
+    pthread_cond_destroy(&condFullSaida);
 }
 
 int main(void) {
@@ -348,20 +345,13 @@ void *startThreadsEntrada(void *args)
     struct Args *argumentos = (struct Args *)args;
     int pRank = argumentos->pRank; 
     int id = argumentos->id;
-    
-    if (pRank == 0) {
-        Receive(1, 0);
-        Receive(2, 0); 
-    } else if (pRank == 1) {
-        while (1) {
-            Receive(0, 1);
-        }
-        
-    } else if (pRank == 2) {
-        while (1) {
-            Receive(0, 2);
-        }
-    } 
+   
+    Receive(1, 0);
+    Receive(0, 1);
+    Receive(2, 0); 
+    Receive(0, 2);
+    Receive(0, 1);
+
     return NULL;
 }
 
@@ -443,7 +433,7 @@ void *startThreadsPrincipal(void *args) {
     
     if (pRank == 0) {
         Clock currentClock = {{0, 0, 0}};
-        Clock g = {{6, 1, 2}};
+        
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
         Event(pRank, &currentClock); 
         while (1) {
@@ -452,6 +442,7 @@ void *startThreadsPrincipal(void *args) {
             Clock a = {{1, 0, 0}};
             Clock c = {{3, 1, 0}};
             Clock e = {{5, 1, 2}};
+            Clock g = {{6, 1, 2}};
             
             if (compareClocks(currentClock, a) || compareClocks(currentClock, c) || compareClocks(currentClock, e)) {
                 submitClockToSaida(currentClock);
