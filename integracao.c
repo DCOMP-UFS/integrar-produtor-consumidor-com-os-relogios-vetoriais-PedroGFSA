@@ -63,7 +63,7 @@ void Event(int pid, Clock *clock)
     clock->p[pid]++;
 }
 
-void Send(int pidSender, int pidReceiver, Clock *clockSender)
+void SendMPI(int pidSender, int pidReceiver, Clock *clockSender)
 {
     MPI_Send(clockSender, sizeof(Clock), MPI_BYTE, pidReceiver, 0, MPI_COMM_WORLD);
 }
@@ -90,7 +90,7 @@ Clock getClockFromSaida()
     return clock;
 }
 
-Clock getClockFromEntrada()
+Clock Receive()
 {
     pthread_mutex_lock(&mutexEntrada);
 
@@ -127,7 +127,7 @@ void submitClockToEntrada(Clock clock)
     pthread_cond_signal(&condEmptyEntrada);
 }
 
-void submitClockToSaida(Clock clock)
+void Send(Clock clock)
 {
     pthread_mutex_lock(&mutexSaida);
     while (clockCountSaida == BUFFER_SIZE)
@@ -142,7 +142,7 @@ void submitClockToSaida(Clock clock)
     pthread_cond_signal(&condEmptySaida);
 }
 
-void Receive()
+void ReceiveMPI()
 {
     Clock clockMsg;
     MPI_Recv(&clockMsg, sizeof(Clock), MPI_BYTE, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -374,7 +374,7 @@ void *startThreadsEntrada(void *args)
 
     while (1)
     {
-        Receive();
+        ReceiveMPI();
     }
 
     return NULL;
@@ -400,11 +400,11 @@ void *startThreadsSaida(void *args)
 
             if (compareClocks(clock, b) || compareClocks(clock, f))
             {
-                Send(pRank, 1, &clock);
+                SendMPI(pRank, 1, &clock);
             }
             else if (compareClocks(clock, d))
             {
-                Send(pRank, 2, &clock);
+                SendMPI(pRank, 2, &clock);
             }
         }
     }
@@ -419,7 +419,7 @@ void *startThreadsSaida(void *args)
             Clock h = {{0, 1, 0}};
             if (compareClocks(clock, h))
             {
-                Send(pRank, 0, &clock);
+                SendMPI(pRank, 0, &clock);
             }
         }
     }
@@ -433,7 +433,7 @@ void *startThreadsSaida(void *args)
             Clock l = {{0, 0, 2}};
             if (compareClocks(clock, l))
             {
-                Send(pRank, 0, &clock);
+                SendMPI(pRank, 0, &clock);
             }
         }
     }
@@ -457,25 +457,25 @@ void *startThreadsPrincipal(void *args)
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
 
         currentClock.p[pRank]++;
-        submitClockToSaida(currentClock);
+        Send(currentClock);
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
 
-        Clock nextClock = getClockFromEntrada();
+        Clock nextClock = Receive();
         currentClock.p[pRank]++;
         updateClock(&currentClock, &nextClock);
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
 
         currentClock.p[pRank]++;
-        submitClockToSaida(currentClock);
+        Send(currentClock);
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
 
-        nextClock = getClockFromEntrada();
+        nextClock = Receive();
         currentClock.p[pRank]++;
         updateClock(&currentClock, &nextClock);
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
 
         currentClock.p[pRank]++;
-        submitClockToSaida(currentClock);
+        Send(currentClock);
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
 
         Event(pRank, &currentClock);
@@ -488,15 +488,15 @@ void *startThreadsPrincipal(void *args)
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
 
         currentClock.p[pRank]++;
-        submitClockToSaida(currentClock);
+        Send(currentClock);
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
 
-        Clock nextClock = getClockFromEntrada();
+        Clock nextClock = Receive();
         currentClock.p[pRank]++;
         updateClock(&currentClock, &nextClock);
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
 
-        nextClock = getClockFromEntrada();
+        nextClock = Receive();
         currentClock.p[pRank]++;
         updateClock(&currentClock, &nextClock);
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
@@ -509,10 +509,10 @@ void *startThreadsPrincipal(void *args)
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
 
         currentClock.p[pRank]++;
-        submitClockToSaida(currentClock);
+        Send(currentClock);
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
 
-        Clock nextClock = getClockFromEntrada();
+        Clock nextClock = Receive();
         currentClock.p[pRank]++;
         updateClock(&currentClock, &nextClock);
         printf("O clock atual é (%d, %d, %d) do processo %d\n", currentClock.p[0], currentClock.p[1], currentClock.p[2], pRank);
